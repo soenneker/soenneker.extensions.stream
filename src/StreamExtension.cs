@@ -4,6 +4,9 @@ using System.Threading.Tasks;
 
 namespace Soenneker.Extensions.Stream;
 
+/// <summary>
+/// A collection of helpful Stream extension methods
+/// </summary>
 public static class StreamExtension
 {
     /// <summary>
