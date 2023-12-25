@@ -8,5 +8,5 @@
 ## Installation
 
 ```
-Install-Package Soenneker.Extensions.Stream
+dotnet add package Soenneker.Extensions.Stream
 ```
