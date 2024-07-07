@@ -1,5 +1,7 @@
 ﻿using System.Diagnostics.Contracts;
 using System.IO;
+using System.Runtime.CompilerServices;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Soenneker.Extensions.Stream;
@@ -10,8 +12,11 @@ namespace Soenneker.Extensions.Stream;
 public static class StreamExtension
 {
     /// <summary>
-    /// Shorthand for <code>Stream.Seek(0, SeekOrigin.Begin)</code>
+    /// Moves the position of the stream to the beginning.
     /// </summary>
+    /// <remarks>Shorthand for <code>Stream.Seek(0, SeekOrigin.Begin)</code></remarks>
+    /// <param name="stream">The stream to move to the start.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void ToStart(this System.IO.Stream stream)
     {
         stream.Seek(0, SeekOrigin.Begin);
@@ -21,10 +26,9 @@ public static class StreamExtension
     /// Does not close the stream. Reads via a StreamReader. Does not reset the position of the stream once done
     /// </summary>
     [Pure]
-    public static async ValueTask<string> ToStr(this System.IO.Stream value)
+    public static Task<string> ToStr(this System.IO.Stream value, CancellationToken cancellationToken = default)
     {
         var reader = new StreamReader(value);
-        string result = await reader.ReadToEndAsync();
-        return result;
+        return reader.ReadToEndAsync(cancellationToken);
     }
 }
