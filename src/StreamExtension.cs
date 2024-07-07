@@ -23,8 +23,11 @@ public static class StreamExtension
     }
 
     /// <summary>
-    /// Does not close the stream. Reads via a StreamReader. Does not reset the position of the stream once done
+    /// Reads the entire content of the stream as a string without closing the stream or resetting its position.
     /// </summary>
+    /// <param name="value">The stream to read from.</param>
+    /// <param name="cancellationToken">A cancellation token to observe while waiting for the task to complete.</param>
+    /// <returns>A task that represents the asynchronous read operation, containing the contents of the stream as a string.</returns>
     [Pure]
     public static Task<string> ToStr(this System.IO.Stream value, CancellationToken cancellationToken = default)
     {
