@@ -16,7 +16,6 @@ public static class StreamExtension
     /// </summary>
     /// <remarks>Shorthand for <code>Stream.Seek(0, SeekOrigin.Begin)</code></remarks>
     /// <param name="stream">The stream to move to the start.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void ToStart(this System.IO.Stream stream)
     {
         stream.Seek(0, SeekOrigin.Begin);
