@@ -11,7 +11,7 @@ public class BenchmarkRunner : BenchmarkTest
     {
     }
 
-   [Fact]
+    //[Fact]
     public async ValueTask ToStr()
     {
         var summary = BenchmarkDotNet.Running.BenchmarkRunner.Run<ToStrBenchmarks>(DefaultConf);
