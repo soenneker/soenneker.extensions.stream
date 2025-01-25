@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics.Contracts;
 using System.IO;
-using System.Text;
+using System.Threading.Tasks;
+using System.Threading;
 
 namespace Soenneker.Extensions.Stream;
 
@@ -21,12 +22,22 @@ public static class StreamExtension
     }
 
     /// <summary>
-    /// Reads the entire content of the stream as a string without closing the stream or resetting its position.
+    /// Reads the entire content of the stream as a string.
     /// </summary>
     [Pure]
-    public static string ToStr(this System.IO.Stream stream)
+    public static string ToStrSync(this System.IO.Stream stream, bool leaveOpen = false)
     {
-        using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, bufferSize: 4096, leaveOpen: true);
+        using var reader = new StreamReader(stream, leaveOpen);
         return reader.ReadToEnd();
+    }
+
+    /// <summary>
+    /// Reads the entire content of the stream as a string.
+    /// </summary>
+    [Pure]
+    public static async ValueTask<string> ToStr(this System.IO.Stream stream, bool leaveOpen = false, CancellationToken cancellationToken = default)
+    {
+        using var reader = new StreamReader(stream, leaveOpen);
+        return await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
     }
 }
