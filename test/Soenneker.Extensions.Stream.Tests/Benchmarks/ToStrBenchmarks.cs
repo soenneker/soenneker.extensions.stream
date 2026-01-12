@@ -2,6 +2,7 @@
 using System.Text;
 using System.Threading.Tasks;
 using BenchmarkDotNet.Attributes;
+using Soenneker.Extensions.Task;
 
 namespace Soenneker.Extensions.Stream.Tests.Benchmarks;
 
@@ -20,7 +21,7 @@ public class ToStrBenchmarks
     {
         using var stream = new MemoryStream(_data);
         using var reader = new StreamReader(stream);
-        return await reader.ReadToEndAsync().ConfigureAwait(false);
+        return await reader.ReadToEndAsync().NoSync();
     }
 
     [Benchmark]

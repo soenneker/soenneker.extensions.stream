@@ -6,6 +6,8 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Soenneker.Extensions.Task;
+using Soenneker.Extensions.ValueTask;
 
 namespace Soenneker.Extensions.Stream;
 
@@ -122,7 +124,7 @@ public static class StreamExtension
             {
                 if (!leaveOpen)
                     await ms.DisposeAsync()
-                            .ConfigureAwait(false);
+                            .NoSync();
             }
         }
 
@@ -136,13 +138,13 @@ public static class StreamExtension
                     return string.Empty;
 
                 return await ReadAllUtf8Async(stream, stripBom: stream.Position == 0, cancellationToken)
-                    .ConfigureAwait(false);
+                    .NoSync();
             }
             finally
             {
                 if (!leaveOpen)
                     await stream.DisposeAsync()
-                                .ConfigureAwait(false);
+                                .NoSync();
             }
         }
 
@@ -150,11 +152,11 @@ public static class StreamExtension
             leaveOpen: leaveOpen);
 
         var result = await reader.ReadToEndAsync(cancellationToken)
-                                 .ConfigureAwait(false);
+                                 .NoSync();
 
         if (!leaveOpen)
             await stream.DisposeAsync()
-                        .ConfigureAwait(false);
+                        .NoSync();
 
         return result;
     }
@@ -233,7 +235,7 @@ public static class StreamExtension
             while (true)
             {
                 var read = await stream.ReadAsync(bytes.AsMemory(0, bytes.Length), cancellationToken)
-                                       .ConfigureAwait(false);
+                                       .NoSync();
                 if (read <= 0)
                     break;
 
@@ -311,7 +313,7 @@ public static class StreamExtension
             while (totalRead < cap)
             {
                 var read = await s.ReadAsync(mem.Slice(totalRead), cancellationToken)
-                                  .ConfigureAwait(false);
+                                  .NoSync();
                 if (read == 0)
                     break;
 

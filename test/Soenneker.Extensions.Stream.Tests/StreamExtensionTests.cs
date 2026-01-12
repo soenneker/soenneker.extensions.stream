@@ -1,7 +1,7 @@
 using System.IO;
 using System.Text;
-using System.Threading.Tasks;
 using AwesomeAssertions;
+using Soenneker.Extensions.Task;
 using Xunit;
 
 namespace Soenneker.Extensions.Stream.Tests;
@@ -9,13 +9,13 @@ namespace Soenneker.Extensions.Stream.Tests;
 public class StreamExtensionTests
 {
     [Fact]
-    public async ValueTask ToStr_should_all_be_equivalent()
+    public async System.Threading.Tasks.ValueTask ToStr_should_all_be_equivalent()
     {
         var data = Encoding.UTF8.GetBytes("234234234");
 
         using var stream1 = new MemoryStream(data);
         using var reader1 = new StreamReader(stream1);
-        var result1 = await reader1.ReadToEndAsync().ConfigureAwait(false);
+        var result1 = await reader1.ReadToEndAsync().NoSync();
 
         using var stream2 = new MemoryStream(data);
         using var reader2 = new StreamReader(stream2);
