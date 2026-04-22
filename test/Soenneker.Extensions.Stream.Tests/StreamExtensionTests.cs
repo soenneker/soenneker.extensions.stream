@@ -2,13 +2,12 @@ using System.IO;
 using System.Text;
 using AwesomeAssertions;
 using Soenneker.Extensions.Task;
-using Xunit;
 
 namespace Soenneker.Extensions.Stream.Tests;
 
 public class StreamExtensionTests
 {
-    [Fact]
+    [Test]
     public async System.Threading.Tasks.ValueTask ToStr_should_all_be_equivalent()
     {
         var data = Encoding.UTF8.GetBytes("234234234");
