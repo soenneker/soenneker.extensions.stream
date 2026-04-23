@@ -1,3 +1,6 @@
+using Soenneker.Benchmarking.Extensions.Summary;
+using Soenneker.Tests.Benchmark;
+
 namespace Soenneker.Extensions.Stream.Tests.Benchmarks;
 
 public class BenchmarkRunner : BenchmarkTest
