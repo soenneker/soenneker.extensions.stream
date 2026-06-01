@@ -1,63 +1,48 @@
-﻿using System;
+﻿using Soenneker.Extensions.Task;
+using Soenneker.Extensions.ValueTask;
+using System;
 using System.Buffers;
-using System.Diagnostics.Contracts;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Soenneker.Extensions.Task;
-using Soenneker.Extensions.ValueTask;
 
 namespace Soenneker.Extensions.Stream;
 
 /// <summary>
-/// A collection of helpful Stream extension methods
+/// A collection of helpful Stream extension methods.
 /// </summary>
 public static class StreamExtension
 {
     private const int _defaultByteChunk = 32 * 1024; // 32KB
     private const int _defaultCharChunk = 16 * 1024; // 16K chars
 
+    private const int _singleDecodeThreshold = 1024 * 1024; // 1MB
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static System.IO.Stream ToStart(this System.IO.Stream stream)
     {
-        if (stream is null)
-            throw new ArgumentNullException(nameof(stream));
+        ArgumentNullException.ThrowIfNull(stream);
 
         if (stream.CanSeek && stream.Position != 0)
-        {
-            // Slightly cheaper than Seek for many Stream types (e.g., MemoryStream).
             stream.Position = 0;
-        }
 
         return stream;
     }
 
-    /// <summary>Reads entire stream as UTF-8.</summary>
-    [Pure, MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    /// <summary>
+    /// Reads the remaining stream contents as UTF-8.
+    /// </summary>
     public static string ToStrSync(this System.IO.Stream stream, bool leaveOpen = false)
     {
-        if (stream is null)
-            throw new ArgumentNullException(nameof(stream));
+        ArgumentNullException.ThrowIfNull(stream);
 
-        // Fast path: MemoryStream with exposed buffer => single decode (no intermediate copy)
-        if (stream is MemoryStream ms && ms.TryGetBuffer(out var seg))
+        if (stream is MemoryStream ms && ms.TryGetBuffer(out ArraySegment<byte> segment))
         {
             try
             {
-                var pos = (int)ms.Position;
-                var remaining = (int)Math.Max(0, ms.Length - ms.Position);
-                if (remaining == 0)
-                    return string.Empty;
-
-                ReadOnlySpan<byte> span = seg.AsSpan(pos, remaining);
-
-                // Only strip BOM if we are at the beginning of the stream.
-                if (pos == 0 && HasUtf8Bom(span))
-                    span = span.Slice(3);
-
-                return Encoding.UTF8.GetString(span);
+                return ReadMemoryStreamUtf8(ms, segment);
             }
             finally
             {
@@ -66,16 +51,17 @@ public static class StreamExtension
             }
         }
 
-        // Seekable streams: decode incrementally to avoid renting massive buffers.
-        if (stream.CanSeek)
+        if (TryGetRemaining(stream, out long position, out long remaining))
         {
             try
             {
-                var remainingLong = stream.Length - stream.Position;
-                if (remainingLong <= 0)
+                if (remaining <= 0)
                     return string.Empty;
 
-                return ReadAllUtf8Sync(stream, stripBom: stream.Position == 0);
+                if (remaining <= _singleDecodeThreshold)
+                    return ReadSmallSeekableUtf8Sync(stream, checked((int)remaining), stripBom: position == 0);
+
+                return ReadAllUtf8Sync(stream, stripBom: position == 0);
             }
             finally
             {
@@ -84,103 +70,158 @@ public static class StreamExtension
             }
         }
 
-        // Generic path: non-seekable streams (network, pipes, etc.)
-        using var reader = new StreamReader(stream, encoding: Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 16 * 1024,
-            leaveOpen: leaveOpen);
+        using var reader = new StreamReader(stream, encoding: Encoding.UTF8, detectEncodingFromByteOrderMarks: true,
+            bufferSize: _defaultByteChunk, leaveOpen: leaveOpen);
 
-        var result = reader.ReadToEnd();
-
-        if (!leaveOpen)
-            stream.Dispose();
-
-        return result;
+        return reader.ReadToEnd();
     }
 
-    /// <summary>Reads entire stream as UTF-8.</summary>
-    [Pure, MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    public static async ValueTask<string> ToStr(this System.IO.Stream stream, bool leaveOpen = false, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Reads the remaining stream contents as UTF-8.
+    /// </summary>
+    public static ValueTask<string> ToStr(this System.IO.Stream stream, bool leaveOpen = false,
+        CancellationToken cancellationToken = default)
     {
-        if (stream is null)
-            throw new ArgumentNullException(nameof(stream));
+        ArgumentNullException.ThrowIfNull(stream);
 
-        // Fast path: MemoryStream with exposed buffer => single decode (no intermediate copy)
-        if (stream is MemoryStream ms && ms.TryGetBuffer(out var seg))
+        if (stream is MemoryStream ms && ms.TryGetBuffer(out ArraySegment<byte> segment))
         {
             try
             {
-                var pos = (int)ms.Position;
-                var remaining = (int)Math.Max(0, ms.Length - ms.Position);
-                if (remaining == 0)
-                    return string.Empty;
-
-                ReadOnlySpan<byte> span = seg.AsSpan(pos, remaining);
-
-                if (pos == 0 && HasUtf8Bom(span))
-                    span = span.Slice(3);
-
-                return Encoding.UTF8.GetString(span);
+                return System.Threading.Tasks.ValueTask.FromResult(ReadMemoryStreamUtf8(ms, segment));
             }
             finally
             {
                 if (!leaveOpen)
-                    await ms.DisposeAsync()
-                            .NoSync();
+                    ms.Dispose();
             }
         }
 
-        // Seekable streams: decode incrementally to avoid renting massive buffers.
-        if (stream.CanSeek)
+        return ToStrCore(stream, leaveOpen, cancellationToken);
+    }
+
+    private static async ValueTask<string> ToStrCore(System.IO.Stream stream, bool leaveOpen,
+        CancellationToken cancellationToken)
+    {
+        if (TryGetRemaining(stream, out long position, out long remaining))
         {
             try
             {
-                var remainingLong = stream.Length - stream.Position;
-                if (remainingLong <= 0)
+                if (remaining <= 0)
                     return string.Empty;
 
-                return await ReadAllUtf8Async(stream, stripBom: stream.Position == 0, cancellationToken)
-                    .NoSync();
+                if (remaining <= _singleDecodeThreshold)
+                {
+                    return await ReadSmallSeekableUtf8Async(stream, checked((int)remaining), stripBom: position == 0,
+                        cancellationToken).NoSync();
+                }
+
+                return await ReadAllUtf8Async(stream, stripBom: position == 0, cancellationToken).NoSync();
             }
             finally
             {
                 if (!leaveOpen)
-                    await stream.DisposeAsync()
-                                .NoSync();
+                    await stream.DisposeAsync().NoSync();
             }
         }
 
-        using var reader = new StreamReader(stream, encoding: Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 16 * 1024,
-            leaveOpen: leaveOpen);
+        using var reader = new StreamReader(stream, encoding: Encoding.UTF8, detectEncodingFromByteOrderMarks: true,
+            bufferSize: _defaultByteChunk, leaveOpen: leaveOpen);
 
-        var result = await reader.ReadToEndAsync(cancellationToken)
-                                 .NoSync();
+        return await reader.ReadToEndAsync(cancellationToken).NoSync();
+    }
 
-        if (!leaveOpen)
-            await stream.DisposeAsync()
-                        .NoSync();
+    private static string ReadMemoryStreamUtf8(MemoryStream ms, ArraySegment<byte> segment)
+    {
+        long positionLong = ms.Position;
+        long remainingLong = ms.Length - positionLong;
+
+        if (remainingLong <= 0)
+            return string.Empty;
+
+        var position = checked((int)positionLong);
+        var remaining = checked((int)remainingLong);
+
+        ReadOnlySpan<byte> span = segment.AsSpan(position, remaining);
+
+        if (position == 0 && HasUtf8Bom(span))
+            span = span[3..];
+
+        string result = Encoding.UTF8.GetString(span);
+
+        // Match normal stream-consumption behavior.
+        ms.Position = ms.Length;
 
         return result;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool HasUtf8Bom(ReadOnlySpan<byte> span) => span.Length >= 3 && span[0] == 0xEF && span[1] == 0xBB && span[2] == 0xBF;
-
-    private static string ReadAllUtf8Sync(System.IO.Stream stream, bool stripBom)
+    private static string ReadSmallSeekableUtf8Sync(System.IO.Stream stream, int count, bool stripBom)
     {
-        // Decoder lets us translate byte chunks -> chars without creating intermediate strings.
-        var decoder = Encoding.UTF8.GetDecoder();
-
-        var bytes = ArrayPool<byte>.Shared.Rent(_defaultByteChunk);
-        var chars = ArrayPool<char>.Shared.Rent(_defaultCharChunk);
+        byte[] rented = ArrayPool<byte>.Shared.Rent(count);
 
         try
         {
-            var sb = new StringBuilder(capacity: 1024);
+            Span<byte> buffer = rented.AsSpan(0, count);
+            int read = stream.ReadAtLeast(buffer, count, throwOnEndOfStream: false);
 
+            if (read <= 0)
+                return string.Empty;
+
+            ReadOnlySpan<byte> span = rented.AsSpan(0, read);
+
+            if (stripBom && HasUtf8Bom(span))
+                span = span[3..];
+
+            return Encoding.UTF8.GetString(span);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(rented);
+        }
+    }
+
+    private static async ValueTask<string> ReadSmallSeekableUtf8Async(System.IO.Stream stream, int count, bool stripBom,
+        CancellationToken cancellationToken)
+    {
+        byte[] rented = ArrayPool<byte>.Shared.Rent(count);
+
+        try
+        {
+            int read = await stream.ReadAtLeastAsync(
+                rented.AsMemory(0, count), count, throwOnEndOfStream: false, cancellationToken).NoSync();
+
+            if (read <= 0)
+                return string.Empty;
+
+            ReadOnlySpan<byte> span = rented.AsSpan(0, read);
+
+            if (stripBom && HasUtf8Bom(span))
+                span = span[3..];
+
+            return Encoding.UTF8.GetString(span);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(rented);
+        }
+    }
+
+    private static string ReadAllUtf8Sync(System.IO.Stream stream, bool stripBom)
+    {
+        Decoder decoder = Encoding.UTF8.GetDecoder();
+
+        byte[] bytes = ArrayPool<byte>.Shared.Rent(_defaultByteChunk);
+        char[] chars = ArrayPool<char>.Shared.Rent(_defaultCharChunk);
+
+        try
+        {
+            var sb = new StringBuilder(capacity: _defaultCharChunk);
             var firstChunk = true;
 
             while (true)
             {
-                var read = stream.Read(bytes, 0, bytes.Length);
+                int read = stream.Read(bytes, 0, bytes.Length);
+
                 if (read <= 0)
                     break;
 
@@ -191,22 +232,25 @@ public static class StreamExtension
                     firstChunk = false;
 
                     if (stripBom && HasUtf8Bom(span))
-                        span = span.Slice(3);
+                        span = span[3..];
                 }
 
                 while (!span.IsEmpty)
                 {
-                    decoder.Convert(span, chars, flush: false, out var bytesUsed, out var charsUsed, out _);
+                    decoder.Convert(span, chars, flush: false, out int bytesUsed, out int charsUsed, out _);
 
                     if (charsUsed > 0)
                         sb.Append(chars, 0, charsUsed);
 
-                    span = span.Slice(bytesUsed);
+                    if (bytesUsed <= 0)
+                        break;
+
+                    span = span[bytesUsed..];
                 }
             }
 
-            // Flush any remaining decoder state.
-            decoder.Convert(ReadOnlySpan<byte>.Empty, chars, flush: true, out _, out var finalChars, out _);
+            decoder.Convert(ReadOnlySpan<byte>.Empty, chars, flush: true, out _, out int finalChars, out _);
+
             if (finalChars > 0)
                 sb.Append(chars, 0, finalChars);
 
@@ -219,23 +263,23 @@ public static class StreamExtension
         }
     }
 
-    private static async ValueTask<string> ReadAllUtf8Async(System.IO.Stream stream, bool stripBom, CancellationToken cancellationToken)
+    private static async ValueTask<string> ReadAllUtf8Async(System.IO.Stream stream, bool stripBom,
+        CancellationToken cancellationToken)
     {
-        var decoder = Encoding.UTF8.GetDecoder();
+        Decoder decoder = Encoding.UTF8.GetDecoder();
 
-        var bytes = ArrayPool<byte>.Shared.Rent(_defaultByteChunk);
-        var chars = ArrayPool<char>.Shared.Rent(_defaultCharChunk);
+        byte[] bytes = ArrayPool<byte>.Shared.Rent(_defaultByteChunk);
+        char[] chars = ArrayPool<char>.Shared.Rent(_defaultCharChunk);
 
         try
         {
-            var sb = new StringBuilder(capacity: 1024);
-
+            var sb = new StringBuilder(capacity: _defaultCharChunk);
             var firstChunk = true;
 
             while (true)
             {
-                var read = await stream.ReadAsync(bytes.AsMemory(0, bytes.Length), cancellationToken)
-                                       .NoSync();
+                int read = await stream.ReadAsync(bytes.AsMemory(0, bytes.Length), cancellationToken).NoSync();
+
                 if (read <= 0)
                     break;
 
@@ -246,21 +290,25 @@ public static class StreamExtension
                     firstChunk = false;
 
                     if (stripBom && HasUtf8Bom(span))
-                        span = span.Slice(3);
+                        span = span[3..];
                 }
 
                 while (!span.IsEmpty)
                 {
-                    decoder.Convert(span, chars, flush: false, out var bytesUsed, out var charsUsed, out _);
+                    decoder.Convert(span, chars, flush: false, out int bytesUsed, out int charsUsed, out _);
 
                     if (charsUsed > 0)
                         sb.Append(chars, 0, charsUsed);
 
-                    span = span.Slice(bytesUsed);
+                    if (bytesUsed <= 0)
+                        break;
+
+                    span = span[bytesUsed..];
                 }
             }
 
-            decoder.Convert(ReadOnlySpan<byte>.Empty, chars, flush: true, out _, out var finalChars, out _);
+            decoder.Convert(ReadOnlySpan<byte>.Empty, chars, flush: true, out _, out int finalChars, out _);
+
             if (finalChars > 0)
                 sb.Append(chars, 0, finalChars);
 
@@ -274,29 +322,27 @@ public static class StreamExtension
     }
 
     /// <summary>
-    /// Reads up to <paramref name="cap"/> bytes from <paramref name="s"/> and decodes as UTF-8.
-    /// Returns the decoded text and total stream length if available (null if not).
+    /// Reads up to <paramref name="cap"/> bytes from <paramref name="stream"/> and decodes them as UTF-8.
+    /// Returns the decoded text and total stream length if available; otherwise null.
     /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    public static async ValueTask<(string text, long? totalLength)> ReadTextUpTo(this System.IO.Stream s, int cap,
+    public static async ValueTask<(string text, long? totalLength)> ReadTextUpTo(this System.IO.Stream stream, int cap,
         CancellationToken cancellationToken = default)
     {
-        if (s is null)
-            throw new ArgumentNullException(nameof(s));
+        ArgumentNullException.ThrowIfNull(stream);
 
-        var totalLen = TryGetTotalLength(s);
+        long? totalLength = TryGetTotalLength(stream);
 
         if (cap <= 0)
-            return (string.Empty, totalLen);
+            return (string.Empty, totalLength);
 
-        // Capture whether we started at position 0 (for BOM stripping).
-        long startPos = 0;
-        var canSeek = s.CanSeek;
+        long startPosition = 0;
+        var canSeek = stream.CanSeek;
+
         if (canSeek)
         {
             try
             {
-                startPos = s.Position;
+                startPosition = stream.Position;
             }
             catch
             {
@@ -304,32 +350,22 @@ public static class StreamExtension
             }
         }
 
-        var rented = ArrayPool<byte>.Shared.Rent(cap);
+        byte[] rented = ArrayPool<byte>.Shared.Rent(cap);
+
         try
         {
-            var totalRead = 0;
-            var mem = rented.AsMemory(0, cap);
+            int totalRead = await stream.ReadAtLeastAsync(
+                rented.AsMemory(0, cap), cap, throwOnEndOfStream: false, cancellationToken).NoSync();
 
-            while (totalRead < cap)
-            {
-                var read = await s.ReadAsync(mem.Slice(totalRead), cancellationToken)
-                                  .NoSync();
-                if (read == 0)
-                    break;
-
-                totalRead += read;
-            }
-
-            if (totalRead == 0)
-                return (string.Empty, totalLen);
+            if (totalRead <= 0)
+                return (string.Empty, totalLength);
 
             ReadOnlySpan<byte> span = rented.AsSpan(0, totalRead);
 
-            // Only strip UTF-8 BOM if we started at the beginning.
-            if ((!canSeek || startPos == 0) && HasUtf8Bom(span))
-                span = span.Slice(3);
+            if ((!canSeek || startPosition == 0) && HasUtf8Bom(span))
+                span = span[3..];
 
-            return (Encoding.UTF8.GetString(span), totalLen);
+            return (Encoding.UTF8.GetString(span), totalLength);
         }
         finally
         {
@@ -337,23 +373,48 @@ public static class StreamExtension
         }
     }
 
-
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static long? TryGetTotalLength(System.IO.Stream s)
+    public static long? TryGetTotalLength(System.IO.Stream stream)
     {
-        if (s is null)
-            throw new ArgumentNullException(nameof(s));
+        ArgumentNullException.ThrowIfNull(stream);
 
-        if (!s.CanSeek)
+        if (!stream.CanSeek)
             return null;
 
         try
         {
-            return s.Length;
+            return stream.Length;
         }
         catch
         {
             return null;
         }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool TryGetRemaining(System.IO.Stream stream, out long position, out long remaining)
+    {
+        position = 0;
+        remaining = 0;
+
+        if (!stream.CanSeek)
+            return false;
+
+        try
+        {
+            position = stream.Position;
+            remaining = stream.Length - position;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool HasUtf8Bom(ReadOnlySpan<byte> span)
+    {
+        return span.Length >= 3 && span[0] == 0xEF && span[1] == 0xBB && span[2] == 0xBF;
     }
 }
