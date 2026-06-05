@@ -20,6 +20,11 @@ public static class StreamExtension
 
     private const int _singleDecodeThreshold = 1024 * 1024; // 1MB
 
+    /// <summary>
+    /// Executes the to start operation.
+    /// </summary>
+    /// <param name="stream">The stream.</param>
+    /// <returns>The result of the operation.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static System.IO.Stream ToStart(this System.IO.Stream stream)
     {
@@ -373,6 +378,11 @@ public static class StreamExtension
         }
     }
 
+    /// <summary>
+    /// Attempts to get total length.
+    /// </summary>
+    /// <param name="stream">The stream.</param>
+    /// <returns>The result of the operation.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static long? TryGetTotalLength(System.IO.Stream stream)
     {
