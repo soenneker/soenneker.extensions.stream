@@ -66,7 +66,7 @@ public static class StreamExtension
                 if (remaining <= _singleDecodeThreshold)
                     return ReadSmallSeekableUtf8Sync(stream, checked((int)remaining), stripBom: position == 0);
 
-                return ReadAllUtf8Sync(stream, stripBom: position == 0);
+                return ReadAllUtf8Sync(stream, checked((int) remaining), stripBom: position == 0);
             }
             finally
             {
@@ -121,7 +121,7 @@ public static class StreamExtension
                         cancellationToken).NoSync();
                 }
 
-                return await ReadAllUtf8Async(stream, stripBom: position == 0, cancellationToken).NoSync();
+                return await ReadAllUtf8Async(stream, checked((int) remaining), stripBom: position == 0, cancellationToken).NoSync();
             }
             finally
             {
@@ -211,118 +211,40 @@ public static class StreamExtension
         }
     }
 
-    private static string ReadAllUtf8Sync(System.IO.Stream stream, bool stripBom)
+    private static string ReadAllUtf8Sync(System.IO.Stream stream, int count, bool stripBom)
     {
-        Decoder decoder = Encoding.UTF8.GetDecoder();
-
-        byte[] bytes = ArrayPool<byte>.Shared.Rent(_defaultByteChunk);
-        char[] chars = ArrayPool<char>.Shared.Rent(_defaultCharChunk);
+        byte[] bytes = ArrayPool<byte>.Shared.Rent(count);
 
         try
         {
-            var sb = new StringBuilder(capacity: _defaultCharChunk);
-            var firstChunk = true;
-
-            while (true)
-            {
-                int read = stream.Read(bytes, 0, bytes.Length);
-
-                if (read <= 0)
-                    break;
-
-                ReadOnlySpan<byte> span = bytes.AsSpan(0, read);
-
-                if (firstChunk)
-                {
-                    firstChunk = false;
-
-                    if (stripBom && HasUtf8Bom(span))
-                        span = span[3..];
-                }
-
-                while (!span.IsEmpty)
-                {
-                    decoder.Convert(span, chars, flush: false, out int bytesUsed, out int charsUsed, out _);
-
-                    if (charsUsed > 0)
-                        sb.Append(chars, 0, charsUsed);
-
-                    if (bytesUsed <= 0)
-                        break;
-
-                    span = span[bytesUsed..];
-                }
-            }
-
-            decoder.Convert(ReadOnlySpan<byte>.Empty, chars, flush: true, out _, out int finalChars, out _);
-
-            if (finalChars > 0)
-                sb.Append(chars, 0, finalChars);
-
-            return sb.ToString();
+            int read = stream.ReadAtLeast(bytes.AsSpan(0, count), count, throwOnEndOfStream: false);
+            ReadOnlySpan<byte> span = bytes.AsSpan(0, read);
+            if (stripBom && HasUtf8Bom(span))
+                span = span[3..];
+            return Encoding.UTF8.GetString(span);
         }
         finally
         {
             ArrayPool<byte>.Shared.Return(bytes);
-            ArrayPool<char>.Shared.Return(chars);
         }
     }
 
-    private static async ValueTask<string> ReadAllUtf8Async(System.IO.Stream stream, bool stripBom,
+    private static async ValueTask<string> ReadAllUtf8Async(System.IO.Stream stream, int count, bool stripBom,
         CancellationToken cancellationToken)
     {
-        Decoder decoder = Encoding.UTF8.GetDecoder();
-
-        byte[] bytes = ArrayPool<byte>.Shared.Rent(_defaultByteChunk);
-        char[] chars = ArrayPool<char>.Shared.Rent(_defaultCharChunk);
+        byte[] bytes = ArrayPool<byte>.Shared.Rent(count);
 
         try
         {
-            var sb = new StringBuilder(capacity: _defaultCharChunk);
-            var firstChunk = true;
-
-            while (true)
-            {
-                int read = await stream.ReadAsync(bytes.AsMemory(0, bytes.Length), cancellationToken).NoSync();
-
-                if (read <= 0)
-                    break;
-
-                ReadOnlySpan<byte> span = bytes.AsSpan(0, read);
-
-                if (firstChunk)
-                {
-                    firstChunk = false;
-
-                    if (stripBom && HasUtf8Bom(span))
-                        span = span[3..];
-                }
-
-                while (!span.IsEmpty)
-                {
-                    decoder.Convert(span, chars, flush: false, out int bytesUsed, out int charsUsed, out _);
-
-                    if (charsUsed > 0)
-                        sb.Append(chars, 0, charsUsed);
-
-                    if (bytesUsed <= 0)
-                        break;
-
-                    span = span[bytesUsed..];
-                }
-            }
-
-            decoder.Convert(ReadOnlySpan<byte>.Empty, chars, flush: true, out _, out int finalChars, out _);
-
-            if (finalChars > 0)
-                sb.Append(chars, 0, finalChars);
-
-            return sb.ToString();
+            int read = await stream.ReadAtLeastAsync(bytes.AsMemory(0, count), count, throwOnEndOfStream: false, cancellationToken).NoSync();
+            ReadOnlySpan<byte> span = bytes.AsSpan(0, read);
+            if (stripBom && HasUtf8Bom(span))
+                span = span[3..];
+            return Encoding.UTF8.GetString(span);
         }
         finally
         {
             ArrayPool<byte>.Shared.Return(bytes);
-            ArrayPool<char>.Shared.Return(chars);
         }
     }
 
