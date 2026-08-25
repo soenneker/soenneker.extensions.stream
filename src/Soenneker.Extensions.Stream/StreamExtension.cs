@@ -66,7 +66,9 @@ public static class StreamExtension
                 if (remaining <= _singleDecodeThreshold)
                     return ReadSmallSeekableUtf8Sync(stream, checked((int)remaining), stripBom: position == 0);
 
-                return ReadAllUtf8Sync(stream, checked((int) remaining), stripBom: position == 0);
+                using var largeReader = new StreamReader(stream, encoding: Encoding.UTF8, detectEncodingFromByteOrderMarks: position == 0,
+                    bufferSize: _defaultByteChunk, leaveOpen: true);
+                return largeReader.ReadToEnd();
             }
             finally
             {
@@ -121,7 +123,9 @@ public static class StreamExtension
                         cancellationToken).NoSync();
                 }
 
-                return await ReadAllUtf8Async(stream, checked((int) remaining), stripBom: position == 0, cancellationToken).NoSync();
+                using var largeReader = new StreamReader(stream, encoding: Encoding.UTF8, detectEncodingFromByteOrderMarks: position == 0,
+                    bufferSize: _defaultByteChunk, leaveOpen: true);
+                return await largeReader.ReadToEndAsync(cancellationToken).NoSync();
             }
             finally
             {
@@ -208,43 +212,6 @@ public static class StreamExtension
         finally
         {
             ArrayPool<byte>.Shared.Return(rented);
-        }
-    }
-
-    private static string ReadAllUtf8Sync(System.IO.Stream stream, int count, bool stripBom)
-    {
-        byte[] bytes = ArrayPool<byte>.Shared.Rent(count);
-
-        try
-        {
-            int read = stream.ReadAtLeast(bytes.AsSpan(0, count), count, throwOnEndOfStream: false);
-            ReadOnlySpan<byte> span = bytes.AsSpan(0, read);
-            if (stripBom && HasUtf8Bom(span))
-                span = span[3..];
-            return Encoding.UTF8.GetString(span);
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(bytes);
-        }
-    }
-
-    private static async ValueTask<string> ReadAllUtf8Async(System.IO.Stream stream, int count, bool stripBom,
-        CancellationToken cancellationToken)
-    {
-        byte[] bytes = ArrayPool<byte>.Shared.Rent(count);
-
-        try
-        {
-            int read = await stream.ReadAtLeastAsync(bytes.AsMemory(0, count), count, throwOnEndOfStream: false, cancellationToken).NoSync();
-            ReadOnlySpan<byte> span = bytes.AsSpan(0, read);
-            if (stripBom && HasUtf8Bom(span))
-                span = span[3..];
-            return Encoding.UTF8.GetString(span);
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(bytes);
         }
     }
 
