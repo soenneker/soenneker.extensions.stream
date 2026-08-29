@@ -21,10 +21,10 @@ public static class StreamExtension
     private const int _singleDecodeThreshold = 1024 * 1024; // 1MB
 
     /// <summary>
-    /// Executes the to start operation.
+    /// Sets a seekable stream's position to zero and returns the same stream.
     /// </summary>
-    /// <param name="stream">The stream.</param>
-    /// <returns>The result of the operation.</returns>
+    /// <param name="stream">The stream to reposition or inspect.</param>
+    /// <returns>The same stream instance, positioned at zero.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static System.IO.Stream ToStart(this System.IO.Stream stream)
     {
@@ -39,6 +39,7 @@ public static class StreamExtension
     /// <summary>
     /// Reads the remaining stream contents as UTF-8.
     /// </summary>
+    /// <returns>Reads the remaining stream contents as UTF-8.</returns>
     public static string ToStrSync(this System.IO.Stream stream, bool leaveOpen = false)
     {
         ArgumentNullException.ThrowIfNull(stream);
@@ -86,6 +87,7 @@ public static class StreamExtension
     /// <summary>
     /// Reads the remaining stream contents as UTF-8.
     /// </summary>
+    /// <returns>Reads the remaining stream contents as UTF-8.</returns>
     public static ValueTask<string> ToStr(this System.IO.Stream stream, bool leaveOpen = false,
         CancellationToken cancellationToken = default)
     {
@@ -219,6 +221,7 @@ public static class StreamExtension
     /// Reads up to <paramref name="cap"/> bytes from <paramref name="stream"/> and decodes them as UTF-8.
     /// Returns the decoded text and total stream length if available; otherwise null.
     /// </summary>
+    /// <returns>Reads up to <paramref name="cap"/> bytes from <paramref name="stream"/> and decodes them as UTF-8. Returns the decoded text and total stream length if available; otherwise null.</returns>
     public static async ValueTask<(string text, long? totalLength)> ReadTextUpTo(this System.IO.Stream stream, int cap,
         CancellationToken cancellationToken = default)
     {
@@ -268,10 +271,10 @@ public static class StreamExtension
     }
 
     /// <summary>
-    /// Attempts to get total length.
+    /// Returns a stream's length when it is available without consuming the stream.
     /// </summary>
-    /// <param name="stream">The stream.</param>
-    /// <returns>The result of the operation.</returns>
+    /// <param name="stream">The stream to reposition or inspect.</param>
+    /// <returns>The stream length, or null when unavailable.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static long? TryGetTotalLength(System.IO.Stream stream)
     {
