@@ -4,6 +4,7 @@ using System;
 using System.Buffers;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -92,6 +93,7 @@ public static class StreamExtension
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(stream);
+        cancellationToken.ThrowIfCancellationRequested();
 
         if (stream is MemoryStream ms && ms.TryGetBuffer(out ArraySegment<byte> segment))
         {
@@ -187,6 +189,7 @@ public static class StreamExtension
         }
         finally
         {
+            CryptographicOperations.ZeroMemory(rented.AsSpan(0, count));
             ArrayPool<byte>.Shared.Return(rented);
         }
     }
@@ -213,6 +216,7 @@ public static class StreamExtension
         }
         finally
         {
+            CryptographicOperations.ZeroMemory(rented.AsSpan(0, count));
             ArrayPool<byte>.Shared.Return(rented);
         }
     }
@@ -266,6 +270,7 @@ public static class StreamExtension
         }
         finally
         {
+            CryptographicOperations.ZeroMemory(rented.AsSpan(0, cap));
             ArrayPool<byte>.Shared.Return(rented);
         }
     }
