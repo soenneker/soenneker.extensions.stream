@@ -17,7 +17,6 @@ namespace Soenneker.Extensions.Stream;
 public static class StreamExtension
 {
     private const int _defaultByteChunk = 32 * 1024; // 32KB
-    private const int _defaultCharChunk = 16 * 1024; // 16K chars
 
     private const int _singleDecodeThreshold = 1024 * 1024; // 1MB
 
