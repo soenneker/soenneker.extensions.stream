@@ -2,26 +2,27 @@ using System.IO;
 using System.Text;
 using AwesomeAssertions;
 using Soenneker.Extensions.Task;
+using System.Threading;
 
 namespace Soenneker.Extensions.Stream.Tests;
 
 public class StreamExtensionTests
 {
     [Test]
-    public async System.Threading.Tasks.ValueTask ToStr_should_all_be_equivalent()
+    public async System.Threading.Tasks.ValueTask ToStr_should_all_be_equivalent(CancellationToken cancellationToken)
     {
         var data = Encoding.UTF8.GetBytes("234234234");
 
         using var stream1 = new MemoryStream(data);
         using var reader1 = new StreamReader(stream1);
-        var result1 = await reader1.ReadToEndAsync().NoSync();
+        var result1 = await reader1.ReadToEndAsync(cancellationToken: cancellationToken).NoSync();
 
         using var stream2 = new MemoryStream(data);
         using var reader2 = new StreamReader(stream2);
         var result2 = reader2.ReadToEnd();
 
         using var stream3 = new MemoryStream(data);
-        var result3 = await stream3.ToStr();
+        var result3 = await stream3.ToStr(cancellationToken: cancellationToken);
 
         using var stream4 = new MemoryStream(data);
         var result4 = stream4.ToStrSync();
